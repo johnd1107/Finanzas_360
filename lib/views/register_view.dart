@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/config/app_config.dart';
 import '../services/api_service.dart';
 
 class RegisterView extends StatefulWidget {
@@ -12,7 +13,9 @@ class _RegisterViewState extends State<RegisterView> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _identifierController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _passwordController = TextEditingController(
+    text: AppConfig.testMode ? AppConfig.testPassword : '',
+  );
   bool _saving = false;
 
   @override
@@ -89,18 +92,34 @@ class _RegisterViewState extends State<RegisterView> {
                         labelText: 'Cédula / Usuario',
                         prefixIcon: Icon(Icons.badge_outlined),
                       ),
-                      validator: (value) => _validateRequired(value, 'su cédula o usuario'),
+                      validator: (value) {
+                        final identifier = value?.trim() ?? '';
+                        if (AppConfig.testMode && !RegExp(r'^\d{10}$').hasMatch(identifier)) {
+                          return 'Ingrese 10 dígitos; no se valida la cédula';
+                        }
+                        return _validateRequired(value, 'su cédula o usuario');
+                      },
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Contraseña',
-                        prefixIcon: Icon(Icons.lock_outline),
+                    if (AppConfig.testMode)
+                      TextFormField(
+                        controller: _passwordController,
+                        readOnly: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Clave común de pruebas',
+                          prefixIcon: Icon(Icons.lock_outline),
+                        ),
+                      )
+                    else
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Contraseña',
+                          prefixIcon: Icon(Icons.lock_outline),
+                        ),
+                        validator: _validatePassword,
                       ),
-                      validator: _validatePassword,
-                    ),
                     const SizedBox(height: 24),
                     FilledButton(
                       onPressed: _saving ? null : _register,

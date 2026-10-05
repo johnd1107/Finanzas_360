@@ -3,6 +3,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../core/constants/app_theme.dart';
+import '../core/config/app_config.dart';
 import '../services/api_service.dart';
 
 class AdminScreen extends StatefulWidget {
@@ -21,6 +22,7 @@ class _AdminScreenState extends State<AdminScreen> {
   List<Map<String, dynamic>> _sucursales = [];
   List<Map<String, dynamic>> _operaciones = [];
   bool _cargando = true;
+  bool _creandoCajero = false;
 
   @override
   void initState() {
@@ -58,14 +60,14 @@ class _AdminScreenState extends State<AdminScreen> {
         _mostrarError(error.message);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _cargando = false);
-      if (mounted) {
-        _mostrarError('Error al conectar con el backend: $e');
-      }
+      _mostrarError('Error al conectar con el backend: $e');
     }
   }
 
   void _mostrarError(String mensaje) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
   }
 
@@ -80,83 +82,141 @@ class _AdminScreenState extends State<AdminScreen> {
     });
   }
 
-  Future<void> _generarPdf() async {
+  Future<void> _generarPdfLista(List<dynamic> usuarios, String titulo) async {
     final pdf = pw.Document();
+    final rows = [
+      ['Cédula / Usuario', 'Nombre', 'Rol', 'Saldo'],
+      ...usuarios.map((user) => [
+        user['cedula']?.toString() ?? '',
+        user['nombre']?.toString() ?? '',
+        user['rol']?.toString() ?? '',
+        '\$${((user['saldo'] as num?)?.toDouble() ?? 0).toStringAsFixed(2)}',
+      ]),
+    ];
+
     pdf.addPage(
       pw.Page(
         build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Finanzas360 - Reporte de Usuarios',
-                  style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+              pw.Text(
+                titulo,
+                style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+              ),
               pw.SizedBox(height: 15),
               pw.TableHelper.fromTextArray(
-                headers: ['Cédula / Usuario', 'Nombre', 'Rol', 'Saldo'],
-                data: _todosLosUsuarios
-                  .map((user) => [user['cedula'], user['nombre'], user['rol'], '\$${user['saldo']}'])
-                    .toList(),
+                headers: rows.first,
+                data: rows.skip(1).toList(),
               ),
             ],
           );
         },
       ),
     );
+
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf.save());
   }
 
   Future<void> _crearCajero() async {
+    final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController();
     final identifierController = TextEditingController();
-    final passwordController = TextEditingController();
-    final branchController = TextEditingController(text: 'Sucursal Centro');
-    final values = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Registrar cajero'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nombre completo')),
-              TextField(controller: identifierController, decoration: const InputDecoration(labelText: 'Usuario')),
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Contraseña (mínimo 10 caracteres)'),
-              ),
-              TextField(controller: branchController, decoration: const InputDecoration(labelText: 'Sucursal')),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-          FilledButton(
-            onPressed: () {
-              if (nameController.text.trim().isEmpty ||
-                  identifierController.text.trim().isEmpty ||
-                  passwordController.text.length < 10) {
-                _mostrarError('Complete los campos y use una contraseña de al menos 10 caracteres');
-                return;
-              }
-              Navigator.pop(dialogContext, {
-                'nombre': nameController.text.trim(),
-                'identificador': identifierController.text.trim(),
-                'contrasena': passwordController.text,
-                'sucursal': branchController.text.trim(),
-              });
-            },
-            child: const Text('Crear cajero'),
-          ),
-        ],
-      ),
+    final passwordController = TextEditingController(
+      text: AppConfig.testMode ? AppConfig.testPassword : '',
     );
-    nameController.dispose();
-    identifierController.dispose();
-    passwordController.dispose();
-    branchController.dispose();
-    if (values == null) return;
+    final branchController = TextEditingController(text: 'Sucursal Centro');
+    Map<String, String>? values;
+    Future<void>? dialogCompleted;
 
+    try {
+      values = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (dialogContext) {
+          dialogCompleted = ModalRoute.of(dialogContext)!.completed;
+          return AlertDialog(
+            title: const Text('Registrar cajero'),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Nombre completo'),
+                      validator: (value) => value == null || value.trim().isEmpty ? 'Ingrese el nombre' : null,
+                    ),
+                    TextFormField(
+                      controller: identifierController,
+                      keyboardType: AppConfig.testMode ? TextInputType.number : TextInputType.text,
+                      decoration: const InputDecoration(labelText: 'Usuario / cédula'),
+                      validator: (value) {
+                        final identifier = value?.trim() ?? '';
+                        if (identifier.isEmpty) return 'Ingrese un usuario';
+                        if (AppConfig.testMode && !RegExp(r'^\d{10}$').hasMatch(identifier)) {
+                          return 'Ingrese 10 dígitos';
+                        }
+                        return null;
+                      },
+                    ),
+                    if (AppConfig.testMode)
+                      const ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.key),
+                        title: Text('Clave común de pruebas: 1725959983'),
+                      )
+                    else
+                      TextFormField(
+                        controller: passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(labelText: 'Contraseña (mínimo 10 caracteres)'),
+                        validator: (value) => value == null || value.length < 10
+                            ? 'La contraseña debe tener al menos 10 caracteres'
+                            : null,
+                      ),
+                    TextFormField(
+                      controller: branchController,
+                      decoration: const InputDecoration(labelText: 'Sucursal'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (!formKey.currentState!.validate()) return;
+                  final result = {
+                    'nombre': nameController.text.trim(),
+                    'identificador': identifierController.text.trim(),
+                    'contrasena': passwordController.text,
+                    'sucursal': branchController.text.trim(),
+                  };
+                  Navigator.of(dialogContext).pop(result);
+                },
+                child: const Text('Crear cajero'),
+              ),
+            ],
+          );
+        },
+      );
+      if (dialogCompleted != null) await dialogCompleted;
+    } finally {
+      nameController.dispose();
+      identifierController.dispose();
+      passwordController.dispose();
+      branchController.dispose();
+    }
+
+    if (values == null || !mounted || _creandoCajero) return;
+
+    if (!mounted) return;
+    setState(() => _creandoCajero = true);
     try {
       await ApiService.createCashier(
         identifier: values['identificador']!,
@@ -164,11 +224,18 @@ class _AdminScreenState extends State<AdminScreen> {
         password: values['contrasena']!,
         branch: values['sucursal']!,
       );
+
       if (!mounted) return;
-      _mostrarError('Cajero registrado exitosamente');
+      _mostrarError('Cajero registrado con éxito');
       await _obtenerClientesDelBackend();
     } on ApiFailure catch (error) {
-      if (mounted) _mostrarError(error.message);
+      if (!mounted) return;
+      _mostrarError(error.message);
+    } catch (error) {
+      if (!mounted) return;
+      _mostrarError('No se pudo registrar el cajero: $error');
+    } finally {
+      if (mounted) setState(() => _creandoCajero = false);
     }
   }
 
@@ -176,32 +243,44 @@ class _AdminScreenState extends State<AdminScreen> {
     final controller = TextEditingController(
       text: ((user['saldo'] as num?)?.toDouble() ?? 0).toStringAsFixed(2),
     );
-    final balance = await showDialog<double>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Ajustar saldo de ${user['nombre']}'),
-        content: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Nuevo saldo', prefixText: '\$ '),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-          FilledButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text.trim().replaceAll(',', '.'));
-              if (value == null || value < 0) {
-                _mostrarError('Ingrese un saldo válido mayor o igual a cero');
-                return;
-              }
-              Navigator.pop(dialogContext, value);
-            },
-            child: const Text('Guardar ajuste'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    double? balance;
+    Future<void>? dialogCompleted;
+    try {
+      balance = await showDialog<double>(
+        context: context,
+        builder: (dialogContext) {
+          dialogCompleted = ModalRoute.of(dialogContext)!.completed;
+          return AlertDialog(
+            title: Text('Ajustar saldo de ${user['nombre']}'),
+            content: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Nuevo saldo', prefixText: '\$ '),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final value = double.tryParse(controller.text.trim().replaceAll(',', '.'));
+                  if (value == null || value < 0) {
+                    _mostrarError('Ingrese un saldo válido mayor o igual a cero');
+                    return;
+                  }
+                  Navigator.pop(dialogContext, value);
+                },
+                child: const Text('Guardar ajuste'),
+              ),
+            ],
+          );
+        },
+      );
+      if (dialogCompleted != null) await dialogCompleted;
+    } finally {
+      controller.dispose();
+    }
     if (balance == null) return;
     try {
       await ApiService.adjustBalance(identifier: user['cedula'].toString(), balance: balance);
@@ -293,12 +372,18 @@ class _AdminScreenState extends State<AdminScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: AppTheme.emeraldGreen),
-                    icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-                    onPressed: _generarPdf,
-                    tooltip: 'Imprimir reporte global de usuarios',
+                  FilledButton.icon(
+                    onPressed: () => _generarPdfLista(_todosLosClientes, 'Finanzas360 - Lista de Clientes'),
+                    icon: const Icon(Icons.picture_as_pdf),
+                    label: const Text('Clientes'),
                   ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => _generarPdfLista(_todosLosUsuarios, 'Finanzas360 - Lista de Usuarios'),
+                    icon: const Icon(Icons.print),
+                    label: const Text('Usuarios'),
+                  ),
+                  const SizedBox(width: 8),
                   IconButton(
                     onPressed: _obtenerClientesDelBackend,
                     tooltip: 'Actualizar datos',

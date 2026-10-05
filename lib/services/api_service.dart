@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,7 +11,7 @@ class ApiService {
     const configuredUrl = String.fromEnvironment('API_BASE_URL');
     if (configuredUrl.isNotEmpty) return configuredUrl;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://127.0.0.1:3000';
+      return 'http://10.0.2.2:3000';
     }
     return 'http://localhost:3000';
   }
@@ -43,11 +45,18 @@ class ApiService {
       final response = await _client.post<Map<String, dynamic>>(
         '/api/auth/login',
         data: {'cedula': identifier, 'contrasena': password},
-      );
+      ).timeout(const Duration(seconds: 10));
       _sessionToken = response.data?['token']?.toString();
       return Map<String, dynamic>.from(response.data?['usuario'] as Map);
     } on DioException catch (error) {
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout) {
+        throw const ApiFailure('Error de conexión con el servidor - Sin conexión');
+      }
       throw ApiFailure.fromDio(error, authentication: true);
+    } catch (error) {
+      throw const ApiFailure('Error de conexión con el servidor - Sin conexión');
     }
   }
 

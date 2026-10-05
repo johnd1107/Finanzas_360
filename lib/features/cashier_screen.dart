@@ -36,37 +36,42 @@ class _CashierScreenState extends State<CashierScreen> {
 
   Future<void> _depositar(Map<String, dynamic> cliente) async {
     final amountController = TextEditingController();
+    Future<void>? dialogCompleted;
     final amount = await showDialog<double>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Depositar a ${cliente['nombre']}'),
-        content: TextField(
-          controller: amountController,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Monto', prefixText: '\$ '),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
+      builder: (dialogContext) {
+        dialogCompleted = ModalRoute.of(dialogContext)!.completed;
+        return AlertDialog(
+          title: Text('Depositar a ${cliente['nombre']}'),
+          content: TextField(
+            controller: amountController,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Monto', prefixText: '\$ '),
           ),
-          FilledButton(
-            onPressed: () {
-              final value = double.tryParse(amountController.text.trim().replaceAll(',', '.'));
-              if (value == null || value <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Ingrese un monto válido')),
-                );
-                return;
-              }
-              Navigator.pop(dialogContext, value);
-            },
-            child: const Text('Depositar'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = double.tryParse(amountController.text.trim().replaceAll(',', '.'));
+                if (value == null || value <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Ingrese un monto válido')),
+                  );
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Depositar'),
+            ),
+          ],
+        );
+      },
     );
+    if (dialogCompleted != null) await dialogCompleted;
     amountController.dispose();
     if (amount == null) return;
 

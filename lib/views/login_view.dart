@@ -1,8 +1,10 @@
 ﻿import 'package:flutter/material.dart';
+import '../core/config/app_config.dart';
 import '../features/admin_screen.dart';
 import '../features/cashier_screen.dart';
 import '../features/profile_screen.dart';
 import '../services/api_service.dart';
+import 'demo_view.dart';
 import 'register_view.dart';
 
 class LoginView extends StatefulWidget {
@@ -95,7 +97,9 @@ class _LoginViewState extends State<LoginView> {
                 controller: _claveController,
                 obscureText: true,
                 decoration: const InputDecoration(
-                  labelText: 'Contraseña',
+                  labelText: AppConfig.testMode
+                      ? 'Contraseña de prueba: ${AppConfig.testPassword}'
+                      : 'Contraseña',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.lock),
                 ),
@@ -124,6 +128,15 @@ class _LoginViewState extends State<LoginView> {
               TextButton(
                 onPressed: _abrirRegistro,
                 child: const Text('¿No tienes cuenta? Regístrate aquí'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const DemoView()),
+                  );
+                },
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Entrar en modo demostración'),
               ),
             ],
           ),

@@ -32,6 +32,26 @@ flutter run -d emulator-5554 --android-skip-build-dependency-validation
 
 Repite el comando `adb reverse` para cada emulador conectado, sustituyendo su identificador. En un teléfono físico, configura una URL accesible desde el teléfono con `--dart-define=API_BASE_URL=http://<IP-del-equipo>:3000`.
 
+## Probar y compartir la app
+
+- **Modo demostración:** abre la app y elige `Entrar en modo demostración`. Muestra movimientos y sucursales de ejemplo, funciona sin servidor y no modifica datos.
+- **Modo de pruebas con backend:** detén cualquier servidor anterior con `Ctrl+C`. En PowerShell, activa el modo de pruebas y arranca el backend:
+
+```powershell
+$env:TEST_MODE = 'true'
+npm --prefix backend start
+```
+
+En otra terminal, compila el APK con `TEST_MODE=true` y la IP Wi-Fi actual del PC:
+
+```powershell
+flutter build apk --release --dart-define=TEST_MODE=true --dart-define=API_BASE_URL=http://<IP-del-equipo>:3000
+```
+
+En modo de pruebas, las cuentas de cliente y cajero usan la clave común `1725959983`; el identificador debe tener exactamente 10 dígitos, sin validar el checksum de la cédula. El administrador de prueba usa la misma clave. El modo normal no aplica estas reglas y no debe usarse con la clave común; el backend bloquea `TEST_MODE` si `NODE_ENV=production`.
+
+Comparte `build/app/outputs/flutter-apk/app-release.apk`. Para iniciar sesión y usar el modo completo, cada celular debe estar conectado a la misma Wi-Fi que el PC, el backend debe seguir ejecutándose y el firewall de Windows debe permitir Node.js/puerto 3000. La IP local puede cambiar; si cambia, hay que compilar otra vez. Fuera de esa red solo funciona la demostración sin servidor. Para conectar desde cualquier red hace falta publicar el backend en Internet.
+
 ## Cuentas de demostración
 
 - Administrador: usuario `admin`, contraseña `1234`.

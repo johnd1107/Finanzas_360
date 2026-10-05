@@ -4,6 +4,12 @@ const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 
+const TEST_MODE = process.env.TEST_MODE === 'true';
+const TEST_PASSWORD = '1725959983';
+if (TEST_MODE && process.env.NODE_ENV === 'production') {
+  throw new Error('TEST_MODE no se puede activar en producción');
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -22,7 +28,20 @@ let usuarios = [
 ];
 
 const cajeros = [
-  { cedula: "cajero001", nombre: "Lucía Torres", email: "lucia@finanzas360.local", saldo: 0, fotoUrl: "", rol: "cajero", sucursal: "Sucursal Centro" }
+  {
+    id: 1,
+    cedula: "cajero001",
+    usuario: "cajero001",
+    nombre: "Lucía Torres",
+    email: "lucia@finanzas360.local",
+    saldo: 0,
+    fotoUrl: "",
+    rol: "cajero",
+    agencia: "Sucursal Centro",
+    sucursal: "Sucursal Centro",
+    password: "Cajero12345",
+    estado: "activo"
+  }
 ];
 const administradores = [
   { cedula: "admin", usuario: "admin", aliases: ["administrador"], nombre: "Administrador", email: "admin@finanzas360.local", saldo: 0, fotoUrl: "", rol: "administrador" }
@@ -66,11 +85,11 @@ function buscarPersona(identificador) {
   );
 }
 
-guardarClave('1234567890', 'Cliente12345');
-guardarClave('0987654321', 'Maria12345');
-guardarClave('cajero001', 'Cajero12345');
-guardarClave('admin', '1234');
-guardarClave('administrador', '1234');
+guardarClave('1234567890', TEST_MODE ? TEST_PASSWORD : 'Cliente12345');
+guardarClave('0987654321', TEST_MODE ? TEST_PASSWORD : 'Maria12345');
+guardarClave('cajero001', TEST_MODE ? TEST_PASSWORD : 'Cajero12345');
+guardarClave('admin', TEST_MODE ? TEST_PASSWORD : '1234');
+guardarClave('administrador', TEST_MODE ? TEST_PASSWORD : '1234');
 
 function autenticar(...rolesPermitidos) {
   return (req, res, next) => {
@@ -96,6 +115,69 @@ function registrarOperacion(tipo, datos) {
   };
   operaciones.push(operacion);
   return operacion;
+}
+
+function crearCajeroDesdeSolicitud(payload = {}) {
+  const cedula = String(payload.cedula ?? payload.usuario ?? payload.id ?? '').trim();
+  const usuario = String(payload.usuario ?? payload.cedula ?? payload.id ?? '').trim();
+  const nombre = String(payload.nombre ?? '').trim();
+  const clave = String(payload.contrasena ?? payload.password ?? '').trim();
+  const agencia = String(payload.agencia ?? payload.sucursal ?? payload.branch ?? '').trim();
+  const estado = String(payload.estado ?? payload.status ?? 'activo').trim() || 'activo';
+
+  return {
+    cedula,
+    usuario: usuario || cedula,
+    nombre,
+    clave,
+    agencia,
+    estado,
+  };
+}
+
+function registrarCajero(req, res) {
+  const { cedula, usuario, nombre, clave, agencia, estado } = crearCajeroDesdeSolicitud(req.body || {});
+  const claveFinal = TEST_MODE ? TEST_PASSWORD : clave;
+
+  if (!cedula || !nombre || (!TEST_MODE && !clave)) {
+    return res.status(400).json({ success: false, message: 'Nombre, usuario y contraseña son obligatorios' });
+  }
+
+  if (TEST_MODE && !/^\d{10}$/.test(cedula)) {
+    return res.status(400).json({ success: false, message: 'El usuario de prueba debe tener exactamente 10 dígitos' });
+  }
+
+  if (claveFinal.length < 10) {
+    return res.status(400).json({ success: false, message: 'La contraseña debe tener al menos 10 caracteres' });
+  }
+
+  if (buscarPersona(cedula) || buscarPersona(usuario)) {
+    return res.status(409).json({ success: false, message: 'Ya existe una cuenta con ese usuario o cédula' });
+  }
+
+  const cajero = {
+    id: Date.now(),
+    cedula,
+    usuario: usuario || cedula,
+    nombre,
+    email: '',
+    saldo: 0,
+    fotoUrl: '',
+    rol: 'cajero',
+    agencia,
+    sucursal: agencia,
+    password: claveFinal,
+    estado,
+  };
+
+  cajeros.push(cajero);
+  guardarClave(cedula, claveFinal);
+
+  return res.status(201).json({
+    success: true,
+    message: 'Cajero registrado con éxito',
+    cajero,
+  });
 }
 
 app.get('/api/admin/usuarios', autenticar('administrador'), (req, res) => {
@@ -125,10 +207,14 @@ app.get('/api/cajero/clientes', autenticar('cajero'), (req, res) => {
 app.post('/api/auth/register', (req, res) => {
   const nombre = String(req.body.nombre || '').trim();
   const cedula = String(req.body.cedula || req.body.usuario || '').trim();
-  const clave = String(req.body.contrasena || '');
+  const clave = TEST_MODE ? TEST_PASSWORD : String(req.body.contrasena || '');
 
-  if (!nombre || !cedula || !clave) {
+  if (!nombre || !cedula || (!TEST_MODE && !req.body.contrasena)) {
     return res.status(400).json({ message: 'Nombre, usuario y contraseña son obligatorios' });
+  }
+
+  if (TEST_MODE && !/^\d{10}$/.test(cedula)) {
+    return res.status(400).json({ message: 'La cédula de prueba debe tener exactamente 10 dígitos' });
   }
   if (clave.length < 10) {
     return res.status(400).json({ message: 'La contraseña debe tener al menos 10 caracteres' });
@@ -173,19 +259,10 @@ app.post('/api/auth/logout', autenticar(), (req, res) => {
   res.status(204).end();
 });
 
-app.post('/api/admin/cajeros', autenticar('administrador'), (req, res) => {
-  const cedula = String(req.body.cedula || req.body.usuario || '').trim();
-  const nombre = String(req.body.nombre || '').trim();
-  const clave = String(req.body.contrasena || '');
-  if (!cedula || !nombre || clave.length < 10) {
-    return res.status(400).json({ message: 'Indique nombre, usuario y una contraseña de al menos 10 caracteres' });
-  }
-  if (buscarPersona(cedula)) return res.status(409).json({ message: 'Ya existe una cuenta con ese usuario' });
-  const cajero = { cedula, nombre, email: '', saldo: 0, fotoUrl: '', rol: 'cajero', sucursal: req.body.sucursal || '' };
-  cajeros.push(cajero);
-  guardarClave(cedula, clave);
-  res.status(201).json(cajero);
-});
+app.post('/api/cajeros', (req, res) => registrarCajero(req, res));
+app.post('/api/users', (req, res) => registrarCajero(req, res));
+
+app.post('/api/admin/cajeros', autenticar('administrador'), (req, res) => registrarCajero(req, res));
 
 app.delete('/api/admin/usuarios/:cedula', autenticar('administrador'), (req, res) => {
   const usuario = usuarios.find((item) => item.cedula === req.params.cedula);
@@ -359,6 +436,6 @@ app.get('/api/notificaciones/:cedula', autenticar('cliente'), (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor backend corriendo en http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor backend corriendo en http://0.0.0.0:${PORT}`);
 });

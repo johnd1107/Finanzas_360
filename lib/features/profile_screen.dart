@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -24,6 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   List<Map<String, dynamic>> _amigos = [];
   List<Map<String, dynamic>> _cajeros = [];
   List<Map<String, dynamic>> _sucursales = [];
+  File? _imageFile;
   Timer? _notificacionesTimer;
   double _saldo = 0;
   bool _guardandoPerfil = false;
@@ -112,19 +114,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _seleccionarFoto() async {
-    ImageHelper.seleccionarImagen(context, (XFile imagen) async {
-      setState(() => _subiendoFoto = true);
-      try {
-        final url = await ApiService.uploadProfileImage(identifier: _cedula, image: imagen);
+    try {
+      await ImageHelper.seleccionarImagen(context, (XFile imagen) async {
         if (!mounted) return;
-        setState(() => _usuario['fotoUrl'] = url);
-        _mostrarMensaje('Foto de perfil guardada');
-      } on ApiFailure catch (error) {
-        if (mounted) _mostrarMensaje(error.message, error: true);
-      } finally {
-        if (mounted) setState(() => _subiendoFoto = false);
-      }
-    });
+        final path = imagen.path.trim();
+        if (path.isEmpty) {
+          _mostrarMensaje('No se pudo acceder a la fotografía seleccionada', error: true);
+          return;
+        }
+        final imageFile = File(path);
+        if (!await imageFile.exists()) {
+          if (!mounted) return;
+          _mostrarMensaje('El archivo de imagen ya no está disponible', error: true);
+          return;
+        }
+        if (!mounted) return;
+        setState(() {
+          _imageFile = imageFile;
+          _subiendoFoto = true;
+        });
+        try {
+          final url = await ApiService.uploadProfileImage(identifier: _cedula, image: imagen);
+          if (!mounted) return;
+          setState(() => _usuario['fotoUrl'] = url);
+          _mostrarMensaje('Foto de perfil guardada');
+        } on ApiFailure catch (error) {
+          if (mounted) _mostrarMensaje(error.message, error: true);
+        } catch (error) {
+          if (mounted) _mostrarMensaje('No se pudo guardar la foto: $error', error: true);
+        } finally {
+          if (mounted) setState(() => _subiendoFoto = false);
+        }
+      });
+    } catch (error) {
+      if (mounted) _mostrarMensaje('No se pudo abrir la cámara o galería: $error', error: true);
+    }
   }
 
   Future<void> _guardarPerfil() async {
@@ -151,35 +175,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _abrirTransferencia(Map<String, dynamic> amigo) async {
     final montoController = TextEditingController();
+    Future<void>? dialogCompleted;
     final monto = await showDialog<double>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Enviar a ${amigo['nombre'] ?? 'amigo'}'),
-        content: TextField(
-          controller: montoController,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Monto', prefixText: '\$ '),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
+      builder: (dialogContext) {
+        dialogCompleted = ModalRoute.of(dialogContext)!.completed;
+        return AlertDialog(
+          title: Text('Enviar a ${amigo['nombre'] ?? 'amigo'}'),
+          content: TextField(
+            controller: montoController,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Monto', prefixText: '\$ '),
           ),
-          FilledButton(
-            onPressed: () {
-              final parsed = double.tryParse(montoController.text.trim().replaceAll(',', '.'));
-              if (parsed == null || parsed <= 0) {
-                _mostrarMensaje('Ingrese un monto válido', error: true);
-                return;
-              }
-              Navigator.pop(dialogContext, parsed);
-            },
-            child: const Text('Transferir'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final parsed = double.tryParse(montoController.text.trim().replaceAll(',', '.'));
+                if (parsed == null || parsed <= 0) {
+                  _mostrarMensaje('Ingrese un monto válido', error: true);
+                  return;
+                }
+                Navigator.pop(dialogContext, parsed);
+              },
+              child: const Text('Transferir'),
+            ),
+          ],
+        );
+      },
     );
+    if (dialogCompleted != null) await dialogCompleted;
     montoController.dispose();
     if (monto == null || !mounted) return;
     final confirmado = await showDialog<bool>(
@@ -253,10 +282,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _foto({required double radio}) {
+    final imageFile = _imageFile;
+    if (imageFile != null && imageFile.existsSync()) {
+      return ClipOval(
+        child: Image.file(
+          imageFile,
+          width: radio * 2,
+          height: radio * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => CircleAvatar(
+            radius: radio,
+            child: Icon(Icons.person, size: radio, color: Colors.white),
+          ),
+        ),
+      );
+    }
+    final fotoUrl = _fotoUrl.trim();
     return CircleAvatar(
       radius: radio,
-      backgroundImage: _fotoUrl.isNotEmpty ? NetworkImage(_fotoUrl) : null,
-      child: _fotoUrl.isEmpty ? Icon(Icons.person, size: radio, color: Colors.white) : null,
+      backgroundImage: fotoUrl.isNotEmpty ? NetworkImage(fotoUrl) : null,
+      child: fotoUrl.isEmpty ? Icon(Icons.person, size: radio, color: Colors.white) : null,
     );
   }
 
